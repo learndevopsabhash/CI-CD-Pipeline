@@ -1,0 +1,101 @@
+name: Flask CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - staging
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Build artifact
+        run: |
+          mkdir -p dist
+          cp app.py dist/
+          cp requirements.txt dist/
+          cp -r templates dist/
+          cp README.md dist/
+          echo "Build completed successfully".
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flask-app-build
+          path: dist/
+
+  deploy-staging:
+    needs: test-and-build
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: flask-app-build
+          path: dist
+
+      - name: Deploy to staging
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USERNAME: ${{ secrets.STAGING_USERNAME }}
+          STAGING_DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+        run: |
+          if [ -z "$STAGING_HOST" ] || [ -z "$STAGING_USERNAME" ] || [ -z "$STAGING_DEPLOY_KEY" ]; then
+            echo "Staging deployment secrets are not configured. Skipping deployment."
+            exit 0
+          fi
+          echo "Deploying to staging environment"
+          mkdir -p deploy-output
+          cp -r dist/* deploy-output/
+
+  deploy-production:
+    needs: test-and-build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: flask-app-build
+          path: dist
+
+      - name: Deploy to production
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USERNAME: ${{ secrets.PROD_USERNAME }}
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+        run: |
+          if [ -z "$PROD_HOST" ] || [ -z "$PROD_USERNAME" ] || [ -z "$PROD_DEPLOY_KEY" ]; then
+            echo "Production deployment secrets are not configured. Skipping deployment."
+            exit 0
+          fi
+          echo "Deploying to production environment"
+          mkdir -p deploy-output
+          cp -r dist/* deploy-output/
